@@ -1,0 +1,67 @@
+name: examples
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      examples: ${{ steps.list.outputs.examples }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: list
+        run: |
+          examples=$(find examples -mindepth 2 -maxdepth 2 -name package.json -printf '%h\n' | sort | jq -R . | jq -cs .)
+          echo "examples=$examples" >> "$GITHUB_OUTPUT"
+
+  locked:
+    needs: discover
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        example: ${{ fromJSON(needs.discover.outputs.examples) }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.example }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ${{ matrix.example }}/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+
+  latest-sdk:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: discover
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        example: ${{ fromJSON(needs.discover.outputs.examples) }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.example }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm install @umbra-privacy/nimbus-solana-web@latest
+      - run: npm ls @umbra-privacy/nimbus-solana-web
+      - run: npm run typecheck
+      - run: npm run build

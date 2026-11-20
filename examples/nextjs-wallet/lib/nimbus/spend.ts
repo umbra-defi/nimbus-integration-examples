@@ -12,7 +12,7 @@ import type {
 import { formatAmount } from "../format";
 import type { ResultSummary } from "../format";
 
-/** Says why a spend stopped before anything left the device. */
+/** Says why a spend was refused before the final payment was submitted. */
 function describeRefusal(refusal: SpendRefusal, decimals: number): string {
   switch (refusal.kind) {
     case "insufficient":
@@ -77,20 +77,19 @@ export function describeSpendResult(
     case "refused":
       return {
         code: `${result.kind}/${result.refusal.kind}`,
-        message: `${describeRefusal(result.refusal, args.decimals)} Nothing was sent.`,
+        message: `${describeRefusal(result.refusal, args.decimals)} ${args.what} was not sent.`,
         tone: "stopped",
       };
     case "relay-refused":
       return {
         code: `${result.kind}/${result.code}`,
-        message: `The relayer refused ${args.what.toLowerCase()}: ${result.detail}. Nothing was sent, and the part this tried to spend is free again.`,
+        message: `The relayer refused ${args.what.toLowerCase()}: ${result.detail}. ${args.what} was not sent, and the part this tried to spend is free again.`,
         tone: "stopped",
       };
     case "unsent":
       return {
         code: `${result.kind}/${result.refusal.kind}`,
-        message:
-          "This browser's account data would not record the transaction, so nothing was sent.",
+        message: `This browser's account data would not record the transaction, so ${args.what.toLowerCase()} was not sent.`,
         tone: "stopped",
       };
     case "merge-failed":

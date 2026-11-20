@@ -9,8 +9,11 @@ import {
 import type {
   NimbusMint,
   NimbusSdk,
+  NimbusSdkErrorReason,
   NimbusSolanaFlowError,
 } from "@umbra-privacy/nimbus-solana-web";
+
+import { readSettings } from "./nimbus/settings";
 
 /** How a flow ended, for the result panel's colour. */
 export type ResultTone = "done" | "waiting" | "stopped";
@@ -80,7 +83,7 @@ export function shortenAddress(text: string): string {
 }
 
 /** What each of the SDK's error reasons means for the user. */
-const ERROR_REASONS: Readonly<Record<string, string>> = {
+const ERROR_REASONS: Readonly<Record<NimbusSdkErrorReason, string>> = {
   misconfigured: "A setting this app was built with is missing or wrong.",
   unreadable:
     "A service or this browser's storage answered something that could not be read.",
@@ -93,7 +96,7 @@ const ERROR_REASONS: Readonly<Record<string, string>> = {
   "dependency-nonconforming":
     "A downloaded file did not match what the app expects, so it was not used.",
   unauthorized:
-    "The gateway refused the request, because this app holds no valid access token.",
+    "The gateway refused this app's gateway token. Your wallet session is fine; check NEXT_PUBLIC_NIMBUS_GATEWAY_TOKEN.",
   "recipient-unregistered":
     "The recipient has not registered yet, so nothing was sent. Ask them to register, or check the address.",
   "account-unregistered":
@@ -161,9 +164,14 @@ function describeFlowRefusal(
 export function describeThrown(thrown: unknown): ResultSummary {
   const message = thrown instanceof Error ? thrown.message : String(thrown);
   if (isNimbusSdkError(thrown)) {
+    const reasonText =
+      thrown.reason === "unauthorized" &&
+      readSettings().gatewayToken === undefined
+        ? "This app has no gateway token configured (NEXT_PUBLIC_NIMBUS_GATEWAY_TOKEN is not set), so the gateway refused the request. Your wallet session is fine."
+        : ERROR_REASONS[thrown.reason];
     return {
       code: thrown.reason,
-      message: `${ERROR_REASONS[thrown.reason] ?? "The SDK stopped."} ${message}`,
+      message: `${reasonText} ${message}`,
       tone: "stopped",
     };
   }

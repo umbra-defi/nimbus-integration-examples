@@ -43,6 +43,30 @@ export interface FlowSpec {
   ) => Promise<ResultSummary>;
 }
 
+/** Warning copy and acknowledgement label when a prior run ended in an uncertain state. */
+function describeWaitingGuard(
+  spec: FlowSpec,
+  summary: ResultSummary,
+): { readonly warning: string; readonly confirmLabel: string } {
+  if (!spec.spendsPrivateBalance) {
+    return {
+      confirmLabel: "I checked Recovery — allow another deposit",
+      warning:
+        "Your previous deposit has not settled yet and may still land. Check the Recovery card to wait for its outcome before submitting another deposit.",
+    };
+  }
+  if (summary.code === "merge-failed/timeout") {
+    return {
+      confirmLabel: "I synced and checked my balance — allow retry",
+      warning: `A balance-combining step timed out and may already have landed or may land later. Refresh and check your private balance before retrying this ${spec.what}.`,
+    };
+  }
+  return {
+    confirmLabel: `I checked my balance — allow a new ${spec.what}`,
+    warning: `Your previous ${spec.what} is still pending and may still land. Do not submit it again until you refresh and check your balance and activity, or a second payment could pick different notes and pay twice.`,
+  };
+}
+
 /**
  * Renders a flow's form: the amount with its token, the recipient, the action, and the flow's
  * steps and result, which outlive leaving the page.
@@ -64,14 +88,26 @@ export function FlowForm({
   const [amount, setAmount] = useState("");
   const [recipient, setRecipient] = useState(spec.ownRecipient);
   const [problem, setProblem] = useState<string | undefined>();
+  const [acknowledgedSummary, setAcknowledgedSummary] = useState<
+    ResultSummary | undefined
+  >();
   const token = labelToken(sdk, mint);
   const available =
     balances.find((entry) => entry.mint === mint)?.available ?? 0n;
   const locked = flow.busy;
+  const waitingSummary =
+    flow.summary?.tone === "waiting" ? flow.summary : undefined;
+  const waitingGuard =
+    waitingSummary !== undefined && acknowledgedSummary !== waitingSummary
+      ? describeWaitingGuard(spec, waitingSummary)
+      : undefined;
 
   /** Checks the form, runs the flow, and records its stages and result. */
   async function submit(event: SyntheticEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
+    if (locked || running !== undefined || waitingGuard !== undefined) {
+      return;
+    }
     const entry = sdk.mints.find((candidate) => candidate.mint === mint);
     if (entry === undefined) {
       setProblem("Choose a token.");
@@ -117,6 +153,9 @@ export function FlowForm({
       updateFlow(spec.what, (previous) => ({ ...previous, summary }));
       if (summary.tone === "done") {
         setAmount("");
+      } else if (summary.tone === "waiting") {
+        setAmount("");
+        setRecipient(spec.ownRecipient);
       }
     } catch (thrown) {
       updateFlow(spec.what, (previous) => ({
@@ -218,10 +257,25 @@ export function FlowForm({
           {problem}
         </p>
       )}
+      {waitingGuard === undefined ? null : (
+        <div className="callout" role="alert">
+          <p>{waitingGuard.warning}</p>
+          <button
+            type="button"
+            className="button quiet compact"
+            disabled={locked}
+            onClick={() => {
+              setAcknowledgedSummary(waitingSummary);
+            }}
+          >
+            {waitingGuard.confirmLabel}
+          </button>
+        </div>
+      )}
       <button
         type="submit"
         className="button primary large"
-        disabled={locked || running !== undefined}
+        disabled={locked || running !== undefined || waitingGuard !== undefined}
       >
         {locked ? (
           <>
@@ -230,6 +284,8 @@ export function FlowForm({
           </>
         ) : running !== undefined ? (
           `Waiting for the ${running}`
+        ) : waitingGuard !== undefined ? (
+          "Check status before sending again"
         ) : (
           spec.submitLabel
         )}

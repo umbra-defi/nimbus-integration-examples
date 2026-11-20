@@ -12,7 +12,7 @@ import type {
 import { formatAmount } from "../format";
 import type { ResultSummary } from "../format";
 
-/** Says why a spend stopped before anything left the device. */
+/** Says why a spend was refused before the final payment was submitted. */
 function describeRefusal(refusal: SpendRefusal, decimals: number): string {
   switch (refusal.kind) {
     case "insufficient":
@@ -50,16 +50,40 @@ function describeSettlement(
     case "pending":
       return {
         code: "relayed/pending",
-        message: `The relayer accepted ${what.toLowerCase()}, and it had not settled when this stopped waiting. Refresh in a minute to see it land.`,
+        message: `The relayer accepted ${what.toLowerCase()}, and it had not settled when this stopped waiting. Do not send it again until you refresh and check your balance and activity, or you could pay twice.`,
         tone: "waiting",
       };
     case "not-followed":
       return {
-        code: "relayed",
-        message: `The relayer accepted ${what.toLowerCase()} and will send it to Solana.`,
-        tone: "done",
+        code: "relayed/not-followed",
+        message: `The relayer accepted ${what.toLowerCase()} and will submit it to Solana, but settlement was not followed. Do not send it again until you refresh and check your balance and activity, or you could pay twice.`,
+        tone: "waiting",
       };
   }
+}
+
+/** Says why combining notes stopped before the final payment was sent. */
+function describeMergeFailure(
+  result: Extract<WithdrawalResult, { readonly kind: "merge-failed" }>,
+  what: string,
+): ResultSummary {
+  const code = `${result.kind}/${result.cause.kind}`;
+  const completed =
+    result.mergesCompleted === 0
+      ? ""
+      : ` ${String(result.mergesCompleted)} earlier combining step${result.mergesCompleted === 1 ? "" : "s"} finished and may have paid fees.`;
+  if (result.cause.kind === "timeout") {
+    return {
+      code,
+      message: `${what} was not sent. Combining your private balance timed out before a step settled, and that merge may already have landed or may land later.${completed} Refresh to sync and check your balance before retrying.`,
+      tone: "waiting",
+    };
+  }
+  return {
+    code,
+    message: `${what} was not sent. Combining your private balance stopped before the payment could be submitted.${completed} Refresh to sync and check your balance before retrying.`,
+    tone: "stopped",
+  };
 }
 
 /**
@@ -77,27 +101,22 @@ export function describeSpendResult(
     case "refused":
       return {
         code: `${result.kind}/${result.refusal.kind}`,
-        message: `${describeRefusal(result.refusal, args.decimals)} Nothing was sent.`,
+        message: `${describeRefusal(result.refusal, args.decimals)} ${args.what} was not sent.`,
         tone: "stopped",
       };
     case "relay-refused":
       return {
         code: `${result.kind}/${result.code}`,
-        message: `The relayer refused ${args.what.toLowerCase()}: ${result.detail}. Nothing was sent, and the part this tried to spend is free again.`,
+        message: `The relayer refused ${args.what.toLowerCase()}: ${result.detail}. ${args.what} was not sent, and the part this tried to spend is free again.`,
         tone: "stopped",
       };
     case "unsent":
       return {
         code: `${result.kind}/${result.refusal.kind}`,
-        message:
-          "This browser's account data would not record the transaction, so nothing was sent.",
+        message: `This browser's account data would not record the transaction, so ${args.what.toLowerCase()} was not sent.`,
         tone: "stopped",
       };
     case "merge-failed":
-      return {
-        code: `${result.kind}/${result.cause.kind}`,
-        message: `The payment needed your private balance combined first, and combining stopped after ${String(result.mergesCompleted)} finished step(s). Those steps stay combined, so a retry needs fewer. Your money is still in your private balance.`,
-        tone: "stopped",
-      };
+      return describeMergeFailure(result, args.what);
   }
 }
